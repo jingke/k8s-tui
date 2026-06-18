@@ -1,4 +1,5 @@
-use crate::components::{ConfirmDialog, ContextSelector, HelpPopup, LogViewer, NamespaceSelector, ResourceDetail, SearchBar};
+use crate::components::container_selector::strip_init_suffix;
+use crate::components::{ConfirmDialog, ContainerSelector, ContextSelector, HelpPopup, LogViewer, NamespaceSelector, ResourceDetail, SearchBar};
 use crate::k8s::{K8sClient, K8sResource};
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent};
@@ -74,6 +75,7 @@ pub enum Popup {
     NamespaceSelector,// 命名空间选择
     Help,             // 帮助页
     LogViewer,        // 日志查看
+    ContainerSelector,// 容器选择（多容器 Pod 查看日志前）
 }
 
 /// 用户友好的错误信息
@@ -117,6 +119,7 @@ pub struct App {
     pub confirm_dialog: ConfirmDialog,
     pub context_selector: ContextSelector,
     pub namespace_selector: NamespaceSelector,
+    pub container_selector: ContainerSelector,
     #[allow(dead_code)]
     pub help_popup: HelpPopup,
     #[allow(dead_code)]
@@ -150,6 +153,7 @@ impl App {
             confirm_dialog: ConfirmDialog::new(),
             context_selector: ContextSelector::new(),
             namespace_selector: NamespaceSelector::new(),
+            container_selector: ContainerSelector::new(),
             help_popup: HelpPopup::new(),
             log_viewer: LogViewer::new(),
             search_bar: SearchBar::new(),
@@ -277,6 +281,7 @@ impl App {
                 return Ok(false);
             }
             Popup::LogViewer => return self.handle_log_keys(key).await,
+            Popup::ContainerSelector => return self.handle_container_keys(key).await,
             Popup::None => {}
         }
 
@@ -405,6 +410,26 @@ impl App {
         Ok(false)
     }
 
+    /// 容器选择器按键
+    async fn handle_container_keys(&mut self, key: KeyEvent) -> Result<bool> {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
+            KeyCode::Enter => {
+                if let Some(display_name) = self.container_selector.selected() {
+                    let container = strip_init_suffix(&display_name).to_string();
+                    self.log_viewer.set_container(Some(container));
+                    self.popup = Popup::LogViewer;
+                    self.log_scroll = 0;
+                    self.load_logs().await;
+                }
+            }
+            KeyCode::Down | KeyCode::Char('j') => self.container_selector.next(),
+            KeyCode::Up | KeyCode::Char('k') => self.container_selector.previous(),
+            _ => {}
+        }
+        Ok(false)
+    }
+
     /// Namespace 选择器按键
     async fn handle_namespace_keys(&mut self, key: KeyEvent) -> Result<bool> {
         match key.code {
@@ -427,6 +452,7 @@ impl App {
     async fn handle_log_keys(&mut self, key: KeyEvent) -> Result<bool> {
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
+            KeyCode::Char('c') => self.open_container_selector().await,
             KeyCode::Down | KeyCode::Char('j') => {
                 self.log_scroll = self.log_scroll.saturating_add(1);
             }
@@ -463,10 +489,48 @@ impl App {
         if name.is_empty() {
             return;
         }
-        self.popup = Popup::LogViewer;
         self.log_viewer.set_pod_name(name);
         self.log_viewer.set_namespace(namespace);
+        self.log_viewer.set_container(None);
+        self.log_scroll = 0;
+        let containers = self.fetch_containers().await;
+        if containers.len() > 1 {
+            self.container_selector.set_items(containers);
+            self.popup = Popup::ContainerSelector;
+            return;
+        }
+        if let Some(only) = containers.into_iter().next() {
+            self.log_viewer.set_container(Some(strip_init_suffix(&only).to_string()));
+        }
+        self.popup = Popup::LogViewer;
         self.load_logs().await;
+    }
+
+    /// 从日志查看器内重新打开容器选择器（多容器时切换容器）
+    async fn open_container_selector(&mut self) {
+        let containers = self.fetch_containers().await;
+        if containers.len() <= 1 {
+            self.set_error("该 Pod 只有一个容器".to_string());
+            return;
+        }
+        self.container_selector.set_items(containers);
+        self.popup = Popup::ContainerSelector;
+    }
+
+    /// 拉取当前日志查看器目标 Pod 的容器列表（失败返回空列表）
+    async fn fetch_containers(&mut self) -> Vec<String> {
+        let Some(client) = &self.k8s_client else {
+            return Vec::new();
+        };
+        let pod_name = self.log_viewer.pod_name.clone();
+        let namespace = self.log_viewer.namespace.clone();
+        match client.get_pod_containers(&pod_name, &namespace).await {
+            Ok(containers) => containers,
+            Err(e) => {
+                self.set_error(friendly_error(&e));
+                Vec::new()
+            }
+        }
     }
 
     async fn show_detail(&mut self) {
@@ -604,7 +668,8 @@ impl App {
 
         let pod_name = self.log_viewer.pod_name.clone();
         let namespace = self.log_viewer.namespace.clone();
-        match client.get_pod_logs(&pod_name, &namespace).await {
+        let container = self.log_viewer.container.clone();
+        match client.get_pod_logs(&pod_name, &namespace, container.as_deref()).await {
             Ok(logs) => self.log_viewer.set_logs(logs),
             Err(e) => self.log_viewer.set_logs(friendly_error(&e)),
         }

@@ -190,6 +190,73 @@ fn test_log_viewer_empty_lines() {
     assert!(lines.is_empty());
 }
 
+#[test]
+fn test_log_viewer_container() {
+    let mut viewer = LogViewer::new();
+    assert_eq!(viewer.container, None);
+    viewer.set_container(Some("app".to_string()));
+    assert_eq!(viewer.container, Some("app".to_string()));
+    viewer.set_container(None);
+    assert_eq!(viewer.container, None);
+}
+
+// ============== ContainerSelector 测试 ==============
+#[test]
+fn test_container_selector_new() {
+    let selector = ContainerSelector::new();
+    assert!(selector.items.is_empty());
+    assert_eq!(selector.state, 0);
+}
+
+#[test]
+fn test_container_selector_set_items_resets_state() {
+    let mut selector = ContainerSelector::new();
+    selector.set_items(vec!["app".to_string(), "sidecar".to_string()]);
+    selector.next();
+    assert_eq!(selector.state, 1);
+    selector.set_items(vec!["a".to_string(), "b".to_string(), "c".to_string()]);
+    assert_eq!(selector.items.len(), 3);
+    assert_eq!(selector.state, 0);
+}
+
+#[test]
+fn test_container_selector_next_and_previous_wrap() {
+    let mut selector = ContainerSelector::new();
+    selector.set_items(vec!["app".to_string(), "sidecar".to_string()]);
+    selector.next();
+    assert_eq!(selector.state, 1);
+    selector.next();
+    assert_eq!(selector.state, 0);
+    selector.previous();
+    assert_eq!(selector.state, 1);
+}
+
+#[test]
+fn test_container_selector_empty_navigation() {
+    let mut selector = ContainerSelector::new();
+    selector.next();
+    selector.previous();
+    assert_eq!(selector.state, 0);
+    assert_eq!(selector.selected(), None);
+}
+
+#[test]
+fn test_container_selector_selected() {
+    let mut selector = ContainerSelector::new();
+    selector.set_items(vec!["app".to_string(), "sidecar".to_string()]);
+    assert_eq!(selector.selected(), Some("app".to_string()));
+    selector.next();
+    assert_eq!(selector.selected(), Some("sidecar".to_string()));
+}
+
+#[test]
+fn test_strip_init_suffix() {
+    use super::container_selector::strip_init_suffix;
+    assert_eq!(strip_init_suffix("init-db (init)"), "init-db");
+    assert_eq!(strip_init_suffix("app"), "app");
+    assert_eq!(strip_init_suffix("weird (init) name"), "weird (init) name");
+}
+
 // ============== ResourceDetail 测试 ==============
 #[test]
 fn test_resource_detail_new() {

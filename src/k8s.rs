@@ -2,7 +2,7 @@ use anyhow::{Context as AnyhowContext, Result};
 use k8s_openapi::api::apps::v1::Deployment;
 use k8s_openapi::api::core::v1::{ConfigMap, Namespace, Node, Pod, Secret, Service};
 use kube::{
-    api::{Api, DeleteParams, ListParams},
+    api::{Api, DeleteParams, ListParams, LogParams},
     config::{Config, KubeConfigOptions, Kubeconfig},
     Client,
 };
@@ -231,10 +231,32 @@ impl K8sClient {
         to_yaml(&secret)
     }
 
-    /// 获取 Pod 日志
-    pub async fn get_pod_logs(&self, name: &str, namespace: &str) -> Result<String> {
+    /// 列出 Pod 内的容器名（包含 Init 容器，Init 容器带 "(init)" 后缀）
+    pub async fn get_pod_containers(&self, name: &str, namespace: &str) -> Result<Vec<String>> {
         let api: Api<Pod> = Api::namespaced(self.client.clone(), namespace);
-        let logs = api.logs(name, &Default::default()).await?;
+        let pod = api.get(name).await?;
+        let spec = pod.spec.context("Pod 缺少 spec")?;
+        let mut containers: Vec<String> = Vec::new();
+        if let Some(init_containers) = spec.init_containers {
+            containers.extend(init_containers.into_iter().map(|c| format!("{} (init)", c.name)));
+        }
+        containers.extend(spec.containers.into_iter().map(|c| c.name));
+        Ok(containers)
+    }
+
+    /// 获取 Pod 日志（container 为 None 时使用 Pod 的默认容器）
+    pub async fn get_pod_logs(
+        &self,
+        name: &str,
+        namespace: &str,
+        container: Option<&str>,
+    ) -> Result<String> {
+        let api: Api<Pod> = Api::namespaced(self.client.clone(), namespace);
+        let params = LogParams {
+            container: container.map(str::to_string),
+            ..Default::default()
+        };
+        let logs = api.logs(name, &params).await?;
         Ok(logs)
     }
 

@@ -1,4 +1,5 @@
 pub mod confirm_dialog;
+pub mod container_selector;
 pub mod context_selector;
 pub mod help_popup;
 pub mod log_viewer;
@@ -7,6 +8,7 @@ pub mod resource_detail;
 pub mod search_bar;
 
 pub use confirm_dialog::ConfirmDialog;
+pub use container_selector::ContainerSelector;
 pub use context_selector::ContextSelector;
 pub use help_popup::HelpPopup;
 pub use log_viewer::LogViewer;

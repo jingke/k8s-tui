@@ -33,6 +33,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         Popup::NamespaceSelector => draw_namespace_selector(f, app),
         Popup::Help => draw_help_popup(f, app),
         Popup::LogViewer => draw_log_viewer(f, app),
+        Popup::ContainerSelector => draw_container_selector(f, app),
         Popup::None => {}
     }
 
@@ -439,7 +440,15 @@ fn draw_log_viewer(f: &mut Frame, app: &App) {
     let area = centered_rect(85, 85, f.area());
     f.render_widget(Clear, area);
 
-    let title = format!(" Pod 日志: {} / {} ", app.log_viewer.pod_name, app.log_viewer.namespace);
+    let container_label = app
+        .log_viewer
+        .container
+        .as_deref()
+        .unwrap_or("default");
+    let title = format!(
+        " Pod 日志: {} / {} [容器: {}] ",
+        app.log_viewer.namespace, app.log_viewer.pod_name, container_label
+    );
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
@@ -466,9 +475,50 @@ fn draw_log_viewer(f: &mut Frame, app: &App) {
         height: 1,
     };
     let hint = Paragraph::new(Text::from(Line::from(vec![
-        Span::styled("[↑/↓] 滚动  [PgUp/PgDn] 翻页  [Esc/q] 关闭", Style::default().fg(Color::Gray)),
+        Span::styled("[↑/↓] 滚动  [PgUp/PgDn] 翻页  [c] 切换容器  [Esc/q] 关闭", Style::default().fg(Color::Gray)),
     ])));
     f.render_widget(hint, hint_area);
+}
+
+/// 容器选择器
+fn draw_container_selector(f: &mut Frame, app: &App) {
+    let area = centered_rect(50, 60, f.area());
+    f.render_widget(Clear, area);
+
+    let title = format!(" 选择容器 ({}) ", app.log_viewer.pod_name);
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+
+    let current = app.log_viewer.container.as_deref();
+    let mut lines: Vec<Line> = app
+        .container_selector
+        .items
+        .iter()
+        .enumerate()
+        .map(|(i, container)| {
+            let is_selected = i == app.container_selector.state;
+            let is_current = current.map_or(false, |c| {
+                container == c || container.trim_end_matches(" (init)") == c
+            });
+            let style = if is_selected {
+                Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD)
+            } else if is_current {
+                Style::default().fg(Color::Green)
+            } else {
+                Style::default()
+            };
+            Line::from(Span::styled(format!("  {}  ", container), style))
+        })
+        .collect();
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "[↑/↓] 选择  [Enter] 查看日志  [Esc] 取消",
+        Style::default().fg(Color::Gray),
+    )));
+
+    f.render_widget(Paragraph::new(Text::from(lines)).block(block), area);
 }
 
 /// 搜索栏
