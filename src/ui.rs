@@ -1,4 +1,5 @@
 use crate::app::{App, Popup, ResourceTab};
+use crate::components::container_selector::strip_init_suffix;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -499,9 +500,7 @@ fn draw_container_selector(f: &mut Frame, app: &App) {
         .enumerate()
         .map(|(i, container)| {
             let is_selected = i == app.container_selector.state;
-            let is_current = current.map_or(false, |c| {
-                container == c || container.trim_end_matches(" (init)") == c
-            });
+            let is_current = current.map_or(false, |c| strip_init_suffix(container) == c);
             let style = if is_selected {
                 Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD)
             } else if is_current {

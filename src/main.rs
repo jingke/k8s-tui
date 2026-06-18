@@ -81,34 +81,24 @@ async fn run_app<B: ratatui::backend::Backend>(
     app: &mut App,
     rx: &mut mpsc::Receiver<Event>,
 ) -> Result<()> {
-    let mut last_tick = std::time::Instant::now();
-    let tick_rate = std::time::Duration::from_millis(250);
-
     loop {
         // 渲染 UI
         terminal.draw(|f| ui::draw(f, app))?;
 
-        // 处理事件
-        let _timeout = tick_rate
-            .checked_sub(last_tick.elapsed())
-            .unwrap_or_else(|| std::time::Duration::from_secs(0));
-
-        if let Ok(event) = rx.try_recv() {
-            match event {
-                Event::Tick => {
-                    app.on_tick().await;
-                }
-                Event::Key(key) => {
-                    if app.handle_key_event(key).await? {
-                        return Ok(());
-                    }
-                }
-                Event::Resize(_, _) => {}
+        // 阻塞等待下一个事件，避免空转占用 CPU
+        let Some(event) = rx.recv().await else {
+            return Ok(());
+        };
+        match event {
+            Event::Tick => {
+                app.on_tick().await;
             }
-        }
-
-        if last_tick.elapsed() >= tick_rate {
-            last_tick = std::time::Instant::now();
+            Event::Key(key) => {
+                if app.handle_key_event(key).await? {
+                    return Ok(());
+                }
+            }
+            Event::Resize(_, _) => {}
         }
     }
 }
