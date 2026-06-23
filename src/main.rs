@@ -98,6 +98,9 @@ async fn run_app<B: ratatui::backend::Backend>(
                     return Ok(());
                 }
             }
+            Event::Mouse(m) => {
+                app.handle_mouse_event(m).await?;
+            }
             Event::Resize(_, _) => {}
         }
     }

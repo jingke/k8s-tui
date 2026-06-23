@@ -308,7 +308,10 @@ fn draw_detail_popup(f: &mut Frame, app: &App) {
         height: 1,
     };
     let hint = Paragraph::new(Text::from(Line::from(vec![
-        Span::styled("[l] Logs  [d] Delete  [Esc] Close", Style::default().fg(Color::Gray)),
+        Span::styled(
+            "[↑/↓] Scroll  [PgUp/PgDn] Page  [l] Logs  [d] Delete  [Esc] Close",
+            Style::default().fg(Color::Gray),
+        ),
     ])));
     f.render_widget(hint, hint_area);
 }

@@ -2,7 +2,7 @@
 
 use crate::app::{App, Popup, ResourceTab};
 use crate::k8s::K8sResource;
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 
 /// 创建一个无 K8s 客户端的 App，用于纯状态测试
 fn create_test_app() -> App {
@@ -16,6 +16,16 @@ fn key_char(c: char) -> KeyEvent {
 
 fn key_code(code: KeyCode) -> KeyEvent {
     KeyEvent::from(code)
+}
+
+/// 快速构造一个鼠标事件（列/行设为 0，不参与滚轮路由）
+fn mouse(kind: MouseEventKind) -> MouseEvent {
+    MouseEvent {
+        kind,
+        column: 0,
+        row: 0,
+        modifiers: KeyModifiers::NONE,
+    }
 }
 
 /// 添加测试资源到 App
@@ -370,6 +380,159 @@ async fn test_app_detail_popup_scroll() {
     app.handle_key_event(key_code(KeyCode::Up)).await.unwrap();
     app.handle_key_event(key_code(KeyCode::Up)).await.unwrap();
     assert_eq!(app.detail_scroll, 0); // saturating_sub
+}
+
+#[tokio::test]
+async fn test_app_detail_popup_page_scroll() {
+    let mut app = create_test_app();
+    app.popup = Popup::Detail;
+    app.detail_scroll = 3;
+
+    app.handle_key_event(key_code(KeyCode::PageDown))
+        .await
+        .unwrap();
+    assert_eq!(app.detail_scroll, 13);
+
+    app.handle_key_event(key_code(KeyCode::PageUp)).await.unwrap();
+    assert_eq!(app.detail_scroll, 3);
+
+    app.handle_key_event(key_code(KeyCode::PageUp)).await.unwrap();
+    assert_eq!(app.detail_scroll, 0); // saturating_sub clamps at 0
+}
+
+// ============== 鼠标事件测试 ==============
+
+#[tokio::test]
+async fn test_app_mouse_wheel_scrolls_resource_list() {
+    let mut app = create_test_app();
+    add_test_resources(
+        &mut app,
+        vec![
+            K8sResource {
+                name: "pod-a".into(),
+                namespace: "default".into(),
+                status: "Running".into(),
+                age: "1m".into(),
+                extra: vec![],
+            },
+            K8sResource {
+                name: "pod-b".into(),
+                namespace: "default".into(),
+                status: "Running".into(),
+                age: "1m".into(),
+                extra: vec![],
+            },
+        ],
+    );
+    app.table_state.select(Some(0));
+
+    app.handle_mouse_event(mouse(MouseEventKind::ScrollDown))
+        .await
+        .unwrap();
+    assert_eq!(app.table_state.selected(), Some(1));
+
+    app.handle_mouse_event(mouse(MouseEventKind::ScrollUp))
+        .await
+        .unwrap();
+    assert_eq!(app.table_state.selected(), Some(0));
+}
+
+#[tokio::test]
+async fn test_app_mouse_wheel_scrolls_detail_popup() {
+    let mut app = create_test_app();
+    app.popup = Popup::Detail;
+    app.detail_scroll = 5;
+
+    app.handle_mouse_event(mouse(MouseEventKind::ScrollDown))
+        .await
+        .unwrap();
+    assert_eq!(app.detail_scroll, 8); // +3
+
+    app.handle_mouse_event(mouse(MouseEventKind::ScrollUp))
+        .await
+        .unwrap();
+    assert_eq!(app.detail_scroll, 5); // -3
+
+    // 触底 saturating_sub
+    app.handle_mouse_event(mouse(MouseEventKind::ScrollUp))
+        .await
+        .unwrap();
+    app.handle_mouse_event(mouse(MouseEventKind::ScrollUp))
+        .await
+        .unwrap();
+    assert_eq!(app.detail_scroll, 0);
+}
+
+#[tokio::test]
+async fn test_app_mouse_wheel_scrolls_log_viewer() {
+    let mut app = create_test_app();
+    app.popup = Popup::LogViewer;
+    app.log_scroll = 4;
+
+    app.handle_mouse_event(mouse(MouseEventKind::ScrollDown))
+        .await
+        .unwrap();
+    assert_eq!(app.log_scroll, 7); // +3
+
+    app.handle_mouse_event(mouse(MouseEventKind::ScrollUp))
+        .await
+        .unwrap();
+    assert_eq!(app.log_scroll, 4);
+}
+
+#[tokio::test]
+async fn test_app_mouse_wheel_moves_namespace_selector() {
+    let mut app = create_test_app();
+    app.popup = Popup::NamespaceSelector;
+    app.namespace_selector
+        .set_items(vec!["default".into(), "kube-system".into(), "all".into()]);
+
+    app.handle_mouse_event(mouse(MouseEventKind::ScrollDown))
+        .await
+        .unwrap();
+    assert_eq!(app.namespace_selector.state, 1);
+
+    app.handle_mouse_event(mouse(MouseEventKind::ScrollUp))
+        .await
+        .unwrap();
+    assert_eq!(app.namespace_selector.state, 0);
+}
+
+#[tokio::test]
+async fn test_app_mouse_click_is_currently_ignored() {
+    // 当前阶段只接 wheel；其他事件（点击、移动）必须无副作用。
+    let mut app = create_test_app();
+    app.popup = Popup::Detail;
+    app.detail_scroll = 7;
+
+    app.handle_mouse_event(mouse(MouseEventKind::Down(
+        crossterm::event::MouseButton::Left,
+    )))
+    .await
+    .unwrap();
+    app.handle_mouse_event(mouse(MouseEventKind::Moved))
+        .await
+        .unwrap();
+
+    assert_eq!(app.detail_scroll, 7);
+    assert_eq!(app.popup, Popup::Detail);
+}
+
+#[tokio::test]
+async fn test_app_mouse_wheel_ignored_in_confirm_dialog() {
+    // 确认与帮助弹窗的滚轮应被忽略，以免误操作。
+    let mut app = create_test_app();
+    app.popup = Popup::ConfirmDelete;
+    let before = app.popup.clone();
+
+    app.handle_mouse_event(mouse(MouseEventKind::ScrollDown))
+        .await
+        .unwrap();
+    app.handle_mouse_event(mouse(MouseEventKind::ScrollUp))
+        .await
+        .unwrap();
+
+    assert_eq!(app.popup, before);
 }
 
 // ============== 日志查看器测试 ==============

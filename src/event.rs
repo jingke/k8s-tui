@@ -1,4 +1,4 @@
-use crossterm::event::{self, Event as CrosstermEvent, KeyEvent};
+use crossterm::event::{self, Event as CrosstermEvent, KeyEvent, MouseEvent};
 use std::time::Duration;
 use tokio::sync::mpsc::Sender;
 
@@ -9,6 +9,8 @@ pub enum Event {
     Tick,
     /// 键盘事件
     Key(KeyEvent),
+    /// 鼠标事件（滚轮、点击等）
+    Mouse(MouseEvent),
     /// 终端尺寸变化
     Resize((), ()),
 }
@@ -38,6 +40,9 @@ impl EventHandler {
                     match evt {
                         CrosstermEvent::Key(key) => {
                             let _ = self.tx.send(Event::Key(key)).await;
+                        }
+                        CrosstermEvent::Mouse(m) => {
+                            let _ = self.tx.send(Event::Mouse(m)).await;
                         }
                         CrosstermEvent::Resize(_w, _h) => {
                             let _ = self.tx.send(Event::Resize((), ())).await;

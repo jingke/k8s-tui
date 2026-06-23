@@ -2,9 +2,15 @@ use crate::components::container_selector::strip_init_suffix;
 use crate::components::{ConfirmDialog, ContainerSelector, ContextSelector, HelpPopup, LogViewer, NamespaceSelector, ResourceDetail, SearchBar};
 use crate::k8s::{K8sClient, K8sResource};
 use anyhow::Result;
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, MouseEvent, MouseEventKind};
 use ratatui::widgets::TableState;
 use std::time::{Duration, Instant};
+
+/// 每次鼠标滚轮事件在内容弹窗（详情 / 日志）中滚动的行数。
+///
+/// 介于键盘 `↑/↓`（1 行）与 `PgUp/PgDn`（10 行）之间，给滚轮一个
+/// 顺手又精细可控的速度。
+const MOUSE_WHEEL_LINES: u16 = 3;
 
 /// 资源类型标签
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -362,6 +368,12 @@ impl App {
             KeyCode::Up | KeyCode::Char('k') => {
                 self.detail_scroll = self.detail_scroll.saturating_sub(1);
             }
+            KeyCode::PageDown => {
+                self.detail_scroll = self.detail_scroll.saturating_add(10);
+            }
+            KeyCode::PageUp => {
+                self.detail_scroll = self.detail_scroll.saturating_sub(10);
+            }
             _ => {}
         }
         Ok(false)
@@ -468,6 +480,58 @@ impl App {
             _ => {}
         }
         Ok(false)
+    }
+
+    /// 鼠标事件入口：当前仅处理滚轮（点击留待后续按 Rect 命中扩展）
+    ///
+    /// 滚轮在不同弹窗下路由到不同的滚动状态：
+    /// - 无弹窗：滚动资源列表（每格 1 行）
+    /// - 详情 / 日志：滚动正文（每格 [`MOUSE_WHEEL_LINES`] 行）
+    /// - 选择器（命名空间 / 上下文 / 容器）：移动选中项（每格 1 项）
+    /// - 其他弹窗（确认、帮助）：忽略
+    pub async fn handle_mouse_event(&mut self, m: MouseEvent) -> Result<()> {
+        match (self.popup.clone(), m.kind) {
+            (Popup::None, MouseEventKind::ScrollDown) => self.next_item(),
+            (Popup::None, MouseEventKind::ScrollUp) => self.previous_item(),
+
+            (Popup::Detail, MouseEventKind::ScrollDown) => {
+                self.detail_scroll = self.detail_scroll.saturating_add(MOUSE_WHEEL_LINES);
+            }
+            (Popup::Detail, MouseEventKind::ScrollUp) => {
+                self.detail_scroll = self.detail_scroll.saturating_sub(MOUSE_WHEEL_LINES);
+            }
+
+            (Popup::LogViewer, MouseEventKind::ScrollDown) => {
+                self.log_scroll = self.log_scroll.saturating_add(MOUSE_WHEEL_LINES);
+            }
+            (Popup::LogViewer, MouseEventKind::ScrollUp) => {
+                self.log_scroll = self.log_scroll.saturating_sub(MOUSE_WHEEL_LINES);
+            }
+
+            (Popup::NamespaceSelector, MouseEventKind::ScrollDown) => {
+                self.namespace_selector.next();
+            }
+            (Popup::NamespaceSelector, MouseEventKind::ScrollUp) => {
+                self.namespace_selector.previous();
+            }
+
+            (Popup::ContextSelector, MouseEventKind::ScrollDown) => {
+                self.context_selector.next();
+            }
+            (Popup::ContextSelector, MouseEventKind::ScrollUp) => {
+                self.context_selector.previous();
+            }
+
+            (Popup::ContainerSelector, MouseEventKind::ScrollDown) => {
+                self.container_selector.next();
+            }
+            (Popup::ContainerSelector, MouseEventKind::ScrollUp) => {
+                self.container_selector.previous();
+            }
+
+            _ => {}
+        }
+        Ok(())
     }
 
     // --- 辅助方法 ---
